@@ -626,25 +626,7 @@ namespace MysteryBoxWorkaround
             bool isSimDone = false;
             isSimControl = true;
             Byte[] RecieveBytes = new Byte[256];
-            double[] analogout= { 2.5, 2.5 };
             double tempvar;
-            UInt32 direction=0;
-            #region Traverse
-            bool isTrafor;
-            bool isTraSpeedPositive = true;
-            double[] TraSpeed = new double[2];
-            double TraSpeedMagnitude = 0;
-            double TraSpeedLimit = 12;
-            ChangeTraRef(0);
-            #endregion
-            #region Lateral
-            bool isLatout;
-            bool isLatSpeedPositive = true;
-            double[] LatSpeed = new double[2];
-            double LatSpeedMagnitude = 0;
-            double LatSpeedLimit = 12;
-            ChangeLatRef(0);
-            #endregion
             #region Vertical
             string VerMessage;
             bool isVerDown = true;
@@ -671,54 +653,30 @@ namespace MysteryBoxWorkaround
                 RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
             }
             RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-            TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
-            LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
-            VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
-            SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 24);
-            //Set Voltage values of Daqboard
-            USB6008_1_Mutex.WaitOne();
-            USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
-            USB6008_1_Mutex.Release();
+            VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
+            SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
+            tempvar = BitConverter.ToDouble(RecieveBytes, 16);
 
-            #region Initialize Traverse Speed
-#if NOT_USING_ANALOG_CONTROL
-            isTraSpeedPositive = trueifpositive(TraSpeed[0]);
-            if (isTraSpeedPositive)
-            {
-                StartTraFor();
-                isTrafor = true;
-            }
-            else
-            {
-                StartTraRev();
-                isTrafor = false;
-            }
-#else
+            #region Initialize Traverse Motor
             WriteModbusQueue(2, 0x0300, 02, false);//set source of master frequency to be from analog input for Traverse motor
-            WriteModbusQueue(2, 0x0706, 10, false);//send motor comand to run for Traverse motor
-#endif
+            WriteModbusQueue(2, 0x010D, 15, false);//set Traverse motor direcction (Fwd/Rev) to be controled digital input terminal DI5
+            WriteModbusQueue(2, 0x0706, 0x02, false);//set Traverse motor to run, but not to set dirrection
+                                                     //30.02 0.0 minimum reverence value 0 to 10 Volts
+                                                     //30.02 10.0 maximum reverence value 0 to 10 Volts
+                                                     //30.03 00 Invert Reverence signal, not inverted
+                                                     //30.07 00 potentiometer offset 0.0-100.0, 0 offset
+                                                     //30.10 00 potentiometer Direction, 00 do not have voltage value control direction
             #endregion
             #region Initialize Lateral Motor
-#if NOT_USING_ANALOG_CONTROL
-            isLatSpeedPositive = trueifpositive(LatSpeed[0]);
-            if (isTraSpeedPositive)
-            {
-                StartLatOut();
-                isLatout = true;
-            }
-            else
-            {
-                StartLatIn();
-                isLatout = false;
-            }
-#else
             WriteModbusQueue(3, 0x0300, 02, false);//set source of master frequency to be from analog input for lateral motor
-            WriteModbusQueue(3, 0x0706, 10, false);//send motor comand to run for lateral motor
-            USB6008_1_Mutex.WaitOne();
-            USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
-            USB6008_1_Mutex.Release();
-#endif
-#endregion
+            WriteModbusQueue(3, 0x010D, 15, false);//set lateral motor direcction (Fwd/Rev) to be controled digital input terminal DI5
+            WriteModbusQueue(3, 0x0706, 0x02, false);//set lateral motor to run, but not to set dirrection
+                                                     //30.02 0.0 minimum reverence value 0 to 10 Volts
+                                                     //30.02 10.0 maximum reverence value 0 to 10 Volts
+                                                     //30.03 00 Invert Reverence signal, not inverted
+                                                     //30.07 00 potentiometer offset 0.0-100.0, 0 offset
+                                                     //30.10 00 potentiometer Direction, 00 do not have voltage value control direction
+            #endregion
             #region Initialize Spindle Speed
             isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
             if (isSpiSpeedCW)
@@ -732,8 +690,6 @@ namespace MysteryBoxWorkaround
                 isSpiCW = false;
             }
 #endregion
-            TraSpeed[0] = -99.9;
-            LatSpeed[0] = -99.9;
             VerSpeed[0] = -99.9;
             SpiSpeed[0] = -99.9;
             while (!isAbort && !isSimDone && !isAlarm)
@@ -743,103 +699,12 @@ namespace MysteryBoxWorkaround
                     RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
                 }
                 RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-                TraSpeed[1] = TraSpeed[0];
-                TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
-                LatSpeed[1] = LatSpeed[0];
-                LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
                 VerSpeed[1] = VerSpeed[0];
-                VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
+                VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
                 SpiSpeed[1] = SpiSpeed[0];
-                SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 24);
-                tempvar = BitConverter.ToDouble(RecieveBytes, 32);
+                SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
+                tempvar = BitConverter.ToDouble(RecieveBytes, 16);
                 isSimDone = System.Convert.ToBoolean(tempvar);
-                #region Updatae Traverse Speed
-#if NOT_USING_ANALOG_CONTROL
-                if (TraSpeed[0] != TraSpeed[1])
-                {
-                    isTraSpeedPositive = trueifpositive(TraSpeed[0]);
-                    TraSpeedMagnitude = Math.Abs(TraSpeed[0]);
-                    //Saturate Traverse speed
-                    if (TraSpeedMagnitude > TraSpeedLimit) TraSpeedMagnitude = TraSpeedLimit;
-                    if (isTraSpeedPositive)
-                    {
-                        if (!isTrafor)
-                        {
-                            StartTraFor();
-                            isTrafor = true;
-                        }
-                    }
-                    else
-                    {
-                        if (isTrafor)
-                        {
-                            StartTraRev();
-                            isTrafor = false;
-                        }
-                    }
-                    ChangeTraRef(TraSpeedMagnitude);
-                }
-#else
-                //Update for traverse to use analog voltage outupt to control is speed and direction
-                TraSpeedMagnitude = Math.Abs(TraSpeed[0]);
-                if (TraSpeedMagnitude > 5) TraSpeedMagnitude = 5;
-                if (TraSpeedMagnitude < 0) TraSpeedMagnitude = 0;
-                    analogout[0] = TraSpeedMagnitude;
-#endif
-                #endregion
-                #region Update Lateral Speed
-#if NOT_USING_ANALOG_CONTROL
-                if (LatSpeed[0] != LatSpeed[1])
-                {
-                    isLatSpeedPositive = trueifpositive(LatSpeed[0]);
-                    LatSpeedMagnitude = Math.Abs(LatSpeed[0]);
-                    //Saturate Latverse speed
-                    if (LatSpeedMagnitude > LatSpeedLimit) LatSpeedMagnitude = LatSpeedLimit;
-                    if (isLatSpeedPositive)
-                    {
-                        if (!isLatout)
-                        {
-                            StartLatOut();
-                            isLatout = true;
-                        }
-                    }
-                    else
-                    {
-                        if (isLatout)
-                        {
-                            StartLatIn();
-                            isLatout = false;
-                        }
-                    }
-                    ChangeLatRef(LatSpeedMagnitude);
-                }
-#else
-                LatSpeedMagnitude = Math.Abs(LatSpeed[0]);
-                if (LatSpeedMagnitude > 5) LatSpeedMagnitude = 5;
-                if (LatSpeedMagnitude < 0) LatSpeedMagnitude = 0;
-                try {
-                    analogout[1] = LatSpeedMagnitude;
-                    USB6008_1_Mutex.WaitOne();
-                    USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
-                    direction = 0;
-                    if(trueifpositive(TraSpeed[0]));
-                    {
-                        direction = direction + 1;
-                    }
-                    if(trueifpositive(LatSpeed[0]))
-                    {
-                        direction = direction + 10;
-                    }
-                    USB6008_1_Digital_Writter.WriteSingleSamplePort(true, direction);
-                    USB6008_1_Mutex.Release();
-                }
-                catch(NationalInstruments.DAQmx.DaqException ex)
-                {
-                    WriteMessageQueue("USB6008 Write Analog ERROR"+ ex.Message.ToString());
-                    isSimDone = true;
-                }
-#endif
-                #endregion
                 #region Update Vertical Speed
                 if (VerSpeed[0] != VerSpeed[1])
                 {
@@ -859,7 +724,7 @@ namespace MysteryBoxWorkaround
                     VerPort.Write(VerMessage);
                 }
 #endregion
-#region Update Spindle Speed
+                #region Update Spindle Speed
                 if (SpiSpeed[0] != SpiSpeed[1])
                 {
                     isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
@@ -893,11 +758,7 @@ namespace MysteryBoxWorkaround
 
                 }
                 #endregion
-#if NOT_USING_ANALOG_CONTROL
-                Thread.Sleep(30);
-#else
                 Thread.Sleep(10);
-#endif
             }
             StopAllMotors();
             isLubWanted = false;
@@ -906,9 +767,12 @@ namespace MysteryBoxWorkaround
             WriteModbusQueue(3, 0x0300, 04, false);//give lateral motor master frequency control to rs-485
             WriteModbusQueue(3, 0x0301, 03, false);//give lateral motor Source of operation command  to rs-485
             WriteModbusQueue(3, 0x0705, 0, false);//set lateral speed to zero
+            WriteModbusQueue(3, 0x010D, 0, false);//set Lateral motor direcction (Fwd/Rev) to be controled by rs-485
+
             WriteModbusQueue(2, 0x0300, 04, false);//give Traverse motor master frequency control to rs-485
             WriteModbusQueue(2, 0x0301, 03, false);//give Traverse motor Source of operation command  to rs-485
             WriteModbusQueue(2, 0x0705, 0, false);//set Traverse speed to zero
+            WriteModbusQueue(2, 0x010D, 0, false);//set Traverse motor direcction (Fwd/Rev) to be controled by rs-485
             SoftStop = 0;
             Thread.Sleep(25);
             isSimControl = false;
