@@ -80,17 +80,11 @@
     <Compile Include="GUI.Designer.cs">
       <DependentUpon>GUI.cs</DependentUpon>
     </Compile>
-    <Compile Include="TrackingSimcs.cs">
-      <SubType>Form</SubType>
+    <Compile Include="ParameterControl.cs">
+      <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="TrackingSimcs.Designer.cs">
-      <DependentUpon>TrackingSimcs.cs</DependentUpon>
-    </Compile>
-    <Compile Include="LinearWeldcs.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="LinearWeldcs.Designer.cs">
-      <DependentUpon>LinearWeldcs.cs</DependentUpon>
+    <Compile Include="ParameterControl.Designer.cs">
+      <DependentUpon>ParameterControl.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -100,20 +94,17 @@
     <Compile Include="Safetycs.Designer.cs">
       <DependentUpon>Safetycs.cs</DependentUpon>
     </Compile>
-    <Compile Include="SpotWeldcs.cs">
+    <Compile Include="WeldGUIForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="SpotWeldcs.Designer.cs">
-      <DependentUpon>SpotWeldcs.cs</DependentUpon>
+    <Compile Include="WeldGUIForm.Designer.cs">
+      <DependentUpon>WeldGUIForm.cs</DependentUpon>
     </Compile>
     <EmbeddedResource Include="GUI.resx">
       <DependentUpon>GUI.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="TrackingSimcs.resx">
-      <DependentUpon>TrackingSimcs.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="LinearWeldcs.resx">
-      <DependentUpon>LinearWeldcs.cs</DependentUpon>
+    <EmbeddedResource Include="ParameterControl.resx">
+      <DependentUpon>ParameterControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -127,8 +118,8 @@
     <EmbeddedResource Include="Safetycs.resx">
       <DependentUpon>Safetycs.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="SpotWeldcs.resx">
-      <DependentUpon>SpotWeldcs.cs</DependentUpon>
+    <EmbeddedResource Include="WeldGUIForm.resx">
+      <DependentUpon>WeldGUIForm.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
