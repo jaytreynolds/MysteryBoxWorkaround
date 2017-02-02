@@ -1,4 +1,5 @@
-﻿using System;
+﻿#define NOT_USING_ANALOG_CONTROL
+using System;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Net;
@@ -11,6 +12,7 @@ using System.IO.Ports;
 using MccDaq; //Using MccDaq to read dyno
 using System.Drawing;
 using System.Diagnostics;
+using System.IO;
 
 namespace MysteryBoxWorkaround
 {
@@ -40,28 +42,15 @@ namespace MysteryBoxWorkaround
         Semaphore ModBusQueueSemaphore = new Semaphore(0, 50);
         Queue ModBusQueue = new Queue();
         SerialPort ModbusPort;
-        Semaphore ModBusQueueMutex = new Semaphore(1,1);//I know, it is not a mutex, but had some weird issues using mutex and multiple threads so this is my hackish solution to use a sempafore as a mutex
+        Semaphore ModBusQueueMutex = new Semaphore(1,1);//I know, it is not a mutex, but had some weird issues using mutex across multiple threads so this is my solution to use a sempafore as a mutex
         Thread ModBusWriteThread;
         #endregion
         #region UDP Communication
         public bool isSimControl = false;
         UdpClient SimulinkReviceUDP = new UdpClient(12005);//recieves from 12000
         UdpClient SimulinkSendUDP = new UdpClient(12006);//sends to 12010 //rapid info sent in this channel, like position forces etc
-        Byte[] Zbytes = new Byte[8];
-        Byte[] Verbytes = new Byte[8];
-        Byte[] Latbytes = new Byte[8];
-        Byte[] Trabytes = new Byte[8];
-        Byte[] XForcebytes = new Byte[8];
-        Byte[] YForcebytes = new Byte[8];
-        Byte[] ZForceDynobytes = new Byte[8];
-        Byte[] TForcebytes = new Byte[8];
-        Byte[] VAnglebytes = new Byte[8];
-        Byte[] SpiCurrentbytes = new Byte[8];
-        Byte[] BytesOutMat = new Byte[256];
-
-        Byte[] VerWeldbytes = new Byte[8];
-        Byte[] VerPlungebytes = new Byte[8];
         IPEndPoint IPSendtoSimulink, IPRecivefromSimulink, IPSendtoSimulinkCommands;
+        public int SoftStop = 0;
         #endregion
         #region SensorBox
         public bool isSenCon = false;
@@ -96,7 +85,7 @@ namespace MysteryBoxWorkaround
         bool isLatIn = false;
         //Values for describing locations in the lateral direction
         double LatVolt = 0;
-        double LatLoc = -3;
+        public double LatLoc = -3;
         public double LatMax = 3.5;
         public double LatMin = 1.5;
         #endregion
@@ -113,12 +102,18 @@ namespace MysteryBoxWorkaround
         public bool isSpiCon = false;
         bool isSpiOn = false;
         #endregion
-        #region Strain Gauge
+        #region NI USB 6008 Daq
         double NIMaxVolt = 1;
-        private NationalInstruments.DAQmx.Task strainTask;
-        double Zvolt, SpiCurrent, Ztemp, ZForce, Zoffset, ZMaxHistory;
+        private NationalInstruments.DAQmx.Task USB6008_1_AITask;
+        private NationalInstruments.DAQmx.Task USB6008_1_AOTask;
+        private NationalInstruments.DAQmx.Task USB6008_1_DOTask;
+        private NationalInstruments.DAQmx.Task USB6008_2_AITask;
+        double Zvolt, SpiCurrent, Ztemp, ZForce, Zoffset, ZMaxHistory,LatMagLoc,TraMagLoc,VerMagLoc;
         public double MaxZForce = 18000;
-        AnalogMultiChannelReader strainReader;
+        Semaphore USB6008_1_Mutex = new Semaphore(1, 1);//I know, it is not a mutex, but had some weird issues using mutex across multiple threads so this is my solution to use a sempafore as a mutex
+        AnalogMultiChannelReader USB6008_1_Reader, USB6008_2_Reader;
+        AnalogMultiChannelWriter USB6008_1_Analog_Writter;
+        DigitalSingleChannelWriter USB6008_1_Digital_Writter;
         #endregion
         bool isAlarm = false;
         #region Threads
@@ -138,6 +133,7 @@ namespace MysteryBoxWorkaround
         Mutex MatlabQueueMutex = new Mutex();
         Thread MatlabWriteThread;
         #endregion
+        double LatMagVolt = 0, TraMagVolt = 0, VerMagVolt = 0;
         #endregion
         public GUI()
         {
@@ -195,36 +191,7 @@ namespace MysteryBoxWorkaround
             }
             #endregion
             #region Setup NI USB-6008
-            try
-            {
-                //Setting up NI DAQ for Axial Force Measurment via Strain Circuit and current Measurment of Spindle Motor for torque 
-                strainTask = new NationalInstruments.DAQmx.Task();
-                AIChannel strainChannel, CurrentChannel;
-                strainChannel = strainTask.AIChannels.CreateVoltageChannel(
-                    "dev2/ai0",  //Physical name of channel
-                    "strainChannel",  //The name to associate with this channel
-                    AITerminalConfiguration.Differential,  //Differential Wiring
-                    -0.1,  //-0.1v minimum
-                    NIMaxVolt,  //1v maximum
-                    AIVoltageUnits.Volts  //Use volts
-                    );
-
-                ///////////////////////////////ADD by JAY 10/22/2014
-                CurrentChannel = strainTask.AIChannels.CreateVoltageChannel(
-                   "dev2/ai1",  //Physical name of channel
-                   "CurrentChannel",  //The name to associate with this channel
-                   AITerminalConfiguration.Differential,  //Differential Wiring
-                   -0.1,  //-0.1v minimum
-                   10,  //10v maximum
-                   AIVoltageUnits.Volts  //Use volts
-                   );
-                ////////////////////////////////////////////////////////////
-                strainReader = new AnalogMultiChannelReader(strainTask.Stream);
-            }
-            catch(NationalInstruments.DAQmx.DaqException e)
-            {
-                MessageBox.Show("Error?\n\n" + e.ToString(), "NI USB 6008 Error");
-            }
+            Setup_USB6008();
             #endregion
             #region Setup UDP
             IPSendtoSimulink = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 12010);
@@ -245,16 +212,121 @@ namespace MysteryBoxWorkaround
             //Start Matlab thread, sends matlab commands so that long function like opening or compiling a model do not hang up the rest of the user interface
             MatlabWriteThread= new Thread(new ThreadStart(MatlabCom));
             MatlabWriteThread.Start();
+            MatlabWriteThread.Priority = ThreadPriority.Highest;
             #endregion
             InitializeComponent();
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(0, 0);
+        }
+        public void Setup_USB6008()
+        {
+            //Resets and configures the NI USB6008 Daq boards
+            #region Setup #1 Straingauge, spindle current, Analog out to lateral and traverse motors
+            Device dev = DaqSystem.Local.LoadDevice("dev2");//added to reset the DAQ boards if they fail to comunicate giving error code 50405
+            dev.Reset();
+            try
+            {
+                #region Setup USB6008_1 analog input
+                //Setting up NI DAQ for Axial Force Measurment via Strain Circuit and current Measurment of Spindle Motor for torque 
+                USB6008_1_AITask = new NationalInstruments.DAQmx.Task();
+                AIChannel StrainChannel, CurrentChannel;
+                AOChannel LateralMotorChannel, TraverseMotorChannel;
+                StrainChannel = USB6008_1_AITask.AIChannels.CreateVoltageChannel(
+                    "dev2/ai0",  //Physical name of channel
+                    "strainChannel",  //The name to associate with this channel
+                    AITerminalConfiguration.Differential,  //Differential Wiring
+                    -0.1,  //-0.1v minimum
+                    NIMaxVolt,  //1v maximum
+                    AIVoltageUnits.Volts  //Use volts
+                    );
+                CurrentChannel = USB6008_1_AITask.AIChannels.CreateVoltageChannel(
+                   "dev2/ai1",  //Physical name of channel
+                   "CurrentChannel",  //The name to associate with this channel
+                   AITerminalConfiguration.Differential,  //Differential Wiring
+                   -0.1,  //-0.1v minimum
+                   10,  //10v maximum
+                   AIVoltageUnits.Volts  //Use volts
+                   );
+                USB6008_1_Reader = new AnalogMultiChannelReader(USB6008_1_AITask.Stream);
+                #endregion
+                ////////////////////////////////////////////////////////////
+                #region Setup USB6008_1 analog output
+                USB6008_1_AOTask = new NationalInstruments.DAQmx.Task();
+                TraverseMotorChannel = USB6008_1_AOTask.AOChannels.CreateVoltageChannel(
+                    "dev2/ao0",  //Physical name of channel)
+                    "TravverseMotorChannel",  //The name to associate with this channel
+                    0,  //0v minimum
+                    5,  //5v maximum
+                    AOVoltageUnits.Volts
+                    );
+                LateralMotorChannel = USB6008_1_AOTask.AOChannels.CreateVoltageChannel(
+                    "dev2/ao1",  //Physical name of channel)
+                    "LateralMotorChannel",  //The name to associate with this channel
+                    0,  //0v minimum
+                    5,  //5v maximum
+                    AOVoltageUnits.Volts
+                    );
+                USB6008_1_Analog_Writter = new AnalogMultiChannelWriter(USB6008_1_AOTask.Stream);
+                #endregion
+                ////////////////////////////////////////////////////////////
+                #region Setup USB6008_1 digital output
+                USB6008_1_DOTask = new NationalInstruments.DAQmx.Task();
+                USB6008_1_DOTask.DOChannels.CreateChannel("Dev2/port0", "port0", ChannelLineGrouping.OneChannelForAllLines);
+                USB6008_1_Digital_Writter = new DigitalSingleChannelWriter(USB6008_1_DOTask.Stream);
+                #endregion
+            }
+            catch (NationalInstruments.DAQmx.DaqException e)
+            {
+                MessageBox.Show("Error?\n\n" + e.ToString(), "NI USB 6008 1 Error");
+            }
+            #endregion
+            #region Setup #2 AI of three axis of lateral traverse and vertical
+            dev = DaqSystem.Local.LoadDevice("dev4");
+            dev.Reset();
+            try
+            {
+                #region Setup USB6008_2 analog input
+                USB6008_2_AITask = new NationalInstruments.DAQmx.Task();
+                AIChannel LatChannel, TraChannel, VerChannel;
+                LatChannel = USB6008_2_AITask.AIChannels.CreateVoltageChannel(
+                  "dev4/ai0",  //Physical name of channel
+                  "LatChannel",  //The name to associate with this channel
+                  AITerminalConfiguration.Differential,  //Differential Wiring
+                  0,  //0. minimum
+                  5,  //10v maximum
+                  AIVoltageUnits.Volts  //Use volts
+                  );
+                TraChannel = USB6008_2_AITask.AIChannels.CreateVoltageChannel(
+                  "dev4/ai2",  //Physical name of channel
+                  "TraChannel",  //The name to associate with this channel
+                   AITerminalConfiguration.Differential,  //Differential Wiring
+                  0,  //0. minimum
+                  5,  //10v maximum
+                  AIVoltageUnits.Volts  //Use volts
+                  );
+                VerChannel = USB6008_2_AITask.AIChannels.CreateVoltageChannel(
+                  "dev4/ai1",  //Physical name of channel
+                  "VerChannel",  //The name to associate with this channel
+                   AITerminalConfiguration.Differential,  //Differential Wiring
+                  0,  //0. minimum
+                  5,  //10v maximum
+                  AIVoltageUnits.Volts  //Use volts
+                  );
+                USB6008_2_Reader = new AnalogMultiChannelReader(USB6008_2_AITask.Stream);
+                #endregion
+            }
+            catch (NationalInstruments.DAQmx.DaqException e)
+            {
+                MessageBox.Show("Error?\n\n" + e.ToString(), "NI USB 6008 2 Error");
+            }
+            #endregion
         }
         #region Threads
         //Thread that reads in data and sends over UDP
         private void MatlabCom()
         {
             MLApp.MLApp matlab = new MLApp.MLApp();//Start matlab
+            MatlabExecute("load_system('simulink')");
             while (true)
             {
                 try
@@ -278,7 +350,11 @@ namespace MysteryBoxWorkaround
             MatlabQueueMutex.WaitOne();
             MatlabQueue.Enqueue(message);
             MatlabQueueMutex.ReleaseMutex();
-            MatlabQueueSemaphore.Release(1);
+            try { MatlabQueueSemaphore.Release(1); }
+            catch (System.Threading.SemaphoreFullException ex)
+            {
+                MessageBox.Show("error releasing MatlabQueueSemaphore 1 " + ex.Message.ToString());
+            }
         }
         public void MatlabExecute(string message)
         {
@@ -292,17 +368,101 @@ namespace MysteryBoxWorkaround
             double[] XYForceData = new double[FilterLength];
             int count = 0;
             double dummy=0;
+            double LatMagVoltPrevious = 0, LatMagDifference=0;
+            double TraMagVoltPrevious = 0,  TraMagDifference = 0;
+            double VerMagVoltPrevious = 0,  VerMagDifference = 0;
+            //sampleing from all 8 channels, DAQ has a max sampling rate of 10,000Hz so for sampleing 8 channels the rate=10,000/8=1,250
             int LowChan = 0, HighChan = 7, Rate = 1250, Count = 8;//JNEW
             String RecieveData;
             int ByteCount;
             int TermIndex;
+            double[] data = { 0, 0, 0 };
+            double[] data1 = { 0, 0};
+            Byte[] Zbytes = new Byte[8];
+            Byte[] Verbytes = new Byte[8];
+            Byte[] Latbytes = new Byte[8];
+            Byte[] Trabytes = new Byte[8];
+            Byte[] XForcebytes = new Byte[8];
+            Byte[] YForcebytes = new Byte[8];
+            Byte[] ZForceDynobytes = new Byte[8];
+            Byte[] TForcebytes = new Byte[8];
+            Byte[] VAnglebytes = new Byte[8];
+            Byte[] SpiCurrentbytes = new Byte[8];
+            Byte[] LatMagLocbytes = new Byte[8];
+            Byte[] TraMagLocbytes = new Byte[8];
+            Byte[] VerMagLocbytes = new Byte[8];
+            Byte[] SoftStopbyte = new byte[1];
+            Byte[] BytesOutMat = new Byte[256];
             while (true)
             {
-                double[] data = strainReader.ReadSingleSample();
-                Zvolt = data[0];
-                SpiCurrent = data[1] * 10;
-                Ztemp = 21050 * (Zvolt-Zoffset);  //Subtract offset and multiply gain....Recalibrated from 17760 N/V on 9/16/2011, Recalibrated from 18843 N/V on 10/5/2011, Recalibrated from 19785 N/V on 5/7/2012
+                #region Read in data from both ni usb 6008 and calulate mag
+                data1[0] = 0;
+                data1[1] = 0;
+                try
+                {
+                    USB6008_1_Mutex.WaitOne();
+                    data1 = USB6008_1_Reader.ReadSingleSample();
+                    USB6008_1_Mutex.Release();
+                }
+                catch(NationalInstruments.DAQmx.DaqException ex)
+                {
+                    WriteMessageQueue("usb6008 1 read error" + ex.Message.ToString());
+                    //error has occured need to reset daq
+                    Setup_USB6008();
+                }
+                Zvolt = data1[0];
+                SpiCurrent = data1[1] * 10;
+                Ztemp = 21050 * (Zvolt - Zoffset);  //Subtract offset and multiply gain....Recalibrated from 17760 N/V on 9/16/2011, Recalibrated from 18843 N/V on 10/5/2011, Recalibrated from 19785 N/V on 5/7/2012
                 ZForce = Ztemp; //BG commented out above 4 lines and added this to report full range (+ and -) Z values for Russ's bobbin welding
+                                //Read in rotation angles of the lateral traverse and vertical using the second ni usb6008
+                LatMagVoltPrevious = LatMagVolt;
+                TraMagVoltPrevious = TraMagVolt;
+                VerMagVoltPrevious = VerMagVolt;
+                try
+                {
+                    data[0] = 0;
+                    data[1] = 0;
+                    data[2] = 0;
+                    data = USB6008_2_Reader.ReadSingleSample();
+                }
+                catch (NationalInstruments.DAQmx.DaqException ex)
+                {
+                    WriteMessageQueue("usb6008 2 read error" + ex.Message.ToString());
+                }
+                LatMagVolt = data[0];
+                TraMagVolt = data[1];
+                VerMagVolt = data[2];
+                #region find LatMagLoc
+                LatMagDifference = LatMagVoltPrevious-LatMagVolt;
+                if (Math.Abs(LatMagDifference) <=3)
+                    LatMagLoc = LatMagLoc + LatMagDifference;
+                else
+                    if (LatMagDifference > 3)
+                        LatMagLoc = LatMagLoc + LatMagDifference - 5;
+                    else
+                        LatMagLoc = LatMagLoc + LatMagDifference + 5;
+                #endregion
+                #region find LatTraLoc
+                TraMagDifference = TraMagVoltPrevious - TraMagVolt;
+                if (Math.Abs(TraMagDifference) <= 3)
+                    TraMagLoc = TraMagLoc + TraMagDifference;
+                else
+                    if (TraMagDifference > 3)
+                    TraMagLoc = TraMagLoc + TraMagDifference - 5;
+                else
+                    TraMagLoc = TraMagLoc + TraMagDifference + 5;
+                #endregion
+                #region find VerMagLoc
+                VerMagDifference = VerMagVoltPrevious - VerMagVolt;
+                if (Math.Abs(VerMagDifference) <= 3)
+                    VerMagLoc = VerMagLoc + VerMagDifference;
+                else
+                    if (VerMagDifference > 3)
+                    VerMagLoc = VerMagLoc + VerMagDifference - 5;
+                else
+                    VerMagLoc = VerMagLoc + VerMagDifference + 5;
+                #endregion
+                #endregion
                 //the first part is done if connected to sensor box
                 #region If Mystery is connected
                 if (isSenCon)
@@ -430,6 +590,10 @@ namespace MysteryBoxWorkaround
                 TForcebytes = BitConverter.GetBytes(TForce);
                 VAnglebytes = BitConverter.GetBytes(VAngle);
                 SpiCurrentbytes = BitConverter.GetBytes(SpiCurrent);
+                LatMagLocbytes= BitConverter.GetBytes(LatMagLoc);
+                TraMagLocbytes = BitConverter.GetBytes(TraMagLoc);
+                VerMagLocbytes = BitConverter.GetBytes(VerMagLoc);
+                SoftStopbyte = BitConverter.GetBytes(SoftStop);
 
                 for (int i = 0; i <= 7; i++) { BytesOutMat[i] = Zbytes[i]; }
                 for (int i = 0; i <= 7; i++) { BytesOutMat[i+8] = Verbytes[i];}
@@ -441,18 +605,324 @@ namespace MysteryBoxWorkaround
                 for (int i = 0; i <= 7; i++) { BytesOutMat[i + 56] = TForcebytes[i]; }
                 for (int i = 0; i <= 7; i++) { BytesOutMat[i + 64] = VAnglebytes[i]; }
                 for (int i = 0; i <= 7; i++) { BytesOutMat[i + 72] = SpiCurrentbytes[i]; }
-                SimulinkSendUDP.Send(BytesOutMat, 80);
+                for (int i = 0; i <= 7; i++) { BytesOutMat[i + 80] = LatMagLocbytes[i]; }
+                for (int i = 0; i <= 7; i++) { BytesOutMat[i + 88] = TraMagLocbytes[i]; }
+                for (int i = 0; i <= 7; i++) { BytesOutMat[i + 96] = VerMagLocbytes[i]; }
+                for (int i = 0; i <= 0; i++) { BytesOutMat[i + 104] = SoftStopbyte[i]; }
+                SimulinkSendUDP.Send(BytesOutMat, 105);
                 #endregion
                 SafetyCheck();
-                Thread.Sleep(25);
+                Thread.Sleep(10);
             }
         }
         public void MatlabUpdateParameters()
         {
             MatlabExecute("set_param(bdroot(gcs), 'SimulationCommand', 'update');");
         }
+        public void SimulinkReciveLoop()
+        {
+            //need to add code to set motor parameters to be snapper in simulink control but less jumpy normally
+            Program.Safetyfrm.UpdateLimitsWelding();
+            bool isSimDone = false;
+            isSimControl = true;
+            Byte[] RecieveBytes = new Byte[256];
+            double[] analogout= { 2.5, 2.5 };
+            double tempvar;
+            UInt32 direction=0;
+            #region Traverse
+            bool isTrafor;
+            bool isTraSpeedPositive = true;
+            double[] TraSpeed = new double[2];
+            double TraSpeedMagnitude = 0;
+            double TraSpeedLimit = 12;
+            ChangeTraRef(0);
+            #endregion
+            #region Lateral
+            bool isLatout;
+            bool isLatSpeedPositive = true;
+            double[] LatSpeed = new double[2];
+            double LatSpeedMagnitude = 0;
+            double LatSpeedLimit = 12;
+            ChangeLatRef(0);
+            #endregion
+            #region Vertical
+            string VerMessage;
+            bool isVerDown = true;
+            double VerSpeedMagnitude = 0;
+            double[] VerSpeed = new double[2];
+            double VerSpeedLimit = 5;
+            double VerAccel = 10;
+            double VerSpeedMinimum = 0.00001;//from motor guide
+            VerMessage = "E MC ";
+            VerPort.Write(VerMessage);
+            #endregion
+            #region Spindle
+            string SpiMessage;
+            bool isSpiCW = true;
+            bool isSpiSpeedCW = true;
+            double SpiSpeedMagnitude = 0;
+            double[] SpiSpeed = new double[2];
+            double SpiSpeedLimit = 2000;
+            ChangeSpiRef(0);
+            StartSpiCW();
+            #endregion
+            while (SimulinkReviceUDP.Available > 0)//clear udp buffer, want to recieve latest packet
+            {
+                RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
+            }
+            RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
+            TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
+            LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
+            VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
+            SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 24);
+            //Set Voltage values of Daqboard
+            USB6008_1_Mutex.WaitOne();
+            USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
+            USB6008_1_Mutex.Release();
+
+            #region Initialize Traverse Speed
+#if NOT_USING_ANALOG_CONTROL
+            isTraSpeedPositive = trueifpositive(TraSpeed[0]);
+            if (isTraSpeedPositive)
+            {
+                StartTraFor();
+                isTrafor = true;
+            }
+            else
+            {
+                StartTraRev();
+                isTrafor = false;
+            }
+#else
+            WriteModbusQueue(2, 0x0300, 02, false);//set source of master frequency to be from analog input for Traverse motor
+            WriteModbusQueue(2, 0x0706, 10, false);//send motor comand to run for Traverse motor
+#endif
+            #endregion
+            #region Initialize Lateral Motor
+#if NOT_USING_ANALOG_CONTROL
+            isLatSpeedPositive = trueifpositive(LatSpeed[0]);
+            if (isTraSpeedPositive)
+            {
+                StartLatOut();
+                isLatout = true;
+            }
+            else
+            {
+                StartLatIn();
+                isLatout = false;
+            }
+#else
+            WriteModbusQueue(3, 0x0300, 02, false);//set source of master frequency to be from analog input for lateral motor
+            WriteModbusQueue(3, 0x0706, 10, false);//send motor comand to run for lateral motor
+            USB6008_1_Mutex.WaitOne();
+            USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
+            USB6008_1_Mutex.Release();
+#endif
+#endregion
+            #region Initialize Spindle Speed
+            isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
+            if (isSpiSpeedCW)
+            {
+                StartSpiCW();
+                isSpiCW = true;
+            }
+            else
+            {
+                StartSpiCCW();
+                isSpiCW = false;
+            }
+#endregion
+            TraSpeed[0] = -99.9;
+            LatSpeed[0] = -99.9;
+            VerSpeed[0] = -99.9;
+            SpiSpeed[0] = -99.9;
+            while (!isAbort && !isSimDone && !isAlarm)
+            {
+                while (SimulinkReviceUDP.Available > 0)//clear udp buffer, want to recieve latest packet
+                {
+                    RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
+                }
+                RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
+                TraSpeed[1] = TraSpeed[0];
+                TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
+                LatSpeed[1] = LatSpeed[0];
+                LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
+                VerSpeed[1] = VerSpeed[0];
+                VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
+                SpiSpeed[1] = SpiSpeed[0];
+                SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 24);
+                tempvar = BitConverter.ToDouble(RecieveBytes, 32);
+                isSimDone = System.Convert.ToBoolean(tempvar);
+                #region Updatae Traverse Speed
+#if NOT_USING_ANALOG_CONTROL
+                if (TraSpeed[0] != TraSpeed[1])
+                {
+                    isTraSpeedPositive = trueifpositive(TraSpeed[0]);
+                    TraSpeedMagnitude = Math.Abs(TraSpeed[0]);
+                    //Saturate Traverse speed
+                    if (TraSpeedMagnitude > TraSpeedLimit) TraSpeedMagnitude = TraSpeedLimit;
+                    if (isTraSpeedPositive)
+                    {
+                        if (!isTrafor)
+                        {
+                            StartTraFor();
+                            isTrafor = true;
+                        }
+                    }
+                    else
+                    {
+                        if (isTrafor)
+                        {
+                            StartTraRev();
+                            isTrafor = false;
+                        }
+                    }
+                    ChangeTraRef(TraSpeedMagnitude);
+                }
+#else
+                //Update for traverse to use analog voltage outupt to control is speed and direction
+                TraSpeedMagnitude = Math.Abs(TraSpeed[0]);
+                if (TraSpeedMagnitude > 5) TraSpeedMagnitude = 5;
+                if (TraSpeedMagnitude < 0) TraSpeedMagnitude = 0;
+                    analogout[0] = TraSpeedMagnitude;
+#endif
+                #endregion
+                #region Update Lateral Speed
+#if NOT_USING_ANALOG_CONTROL
+                if (LatSpeed[0] != LatSpeed[1])
+                {
+                    isLatSpeedPositive = trueifpositive(LatSpeed[0]);
+                    LatSpeedMagnitude = Math.Abs(LatSpeed[0]);
+                    //Saturate Latverse speed
+                    if (LatSpeedMagnitude > LatSpeedLimit) LatSpeedMagnitude = LatSpeedLimit;
+                    if (isLatSpeedPositive)
+                    {
+                        if (!isLatout)
+                        {
+                            StartLatOut();
+                            isLatout = true;
+                        }
+                    }
+                    else
+                    {
+                        if (isLatout)
+                        {
+                            StartLatIn();
+                            isLatout = false;
+                        }
+                    }
+                    ChangeLatRef(LatSpeedMagnitude);
+                }
+#else
+                LatSpeedMagnitude = Math.Abs(LatSpeed[0]);
+                if (LatSpeedMagnitude > 5) LatSpeedMagnitude = 5;
+                if (LatSpeedMagnitude < 0) LatSpeedMagnitude = 0;
+                try {
+                    analogout[1] = LatSpeedMagnitude;
+                    USB6008_1_Mutex.WaitOne();
+                    USB6008_1_Analog_Writter.WriteSingleSample(true, analogout);
+                    direction = 0;
+                    if(trueifpositive(TraSpeed[0]));
+                    {
+                        direction = direction + 1;
+                    }
+                    if(trueifpositive(LatSpeed[0]))
+                    {
+                        direction = direction + 10;
+                    }
+                    USB6008_1_Digital_Writter.WriteSingleSamplePort(true, direction);
+                    USB6008_1_Mutex.Release();
+                }
+                catch(NationalInstruments.DAQmx.DaqException ex)
+                {
+                    WriteMessageQueue("USB6008 Write Analog ERROR"+ ex.Message.ToString());
+                    isSimDone = true;
+                }
+#endif
+                #endregion
+                #region Update Vertical Speed
+                if (VerSpeed[0] != VerSpeed[1])
+                {
+                    isVerDown = trueifpositive(VerSpeed[0]);
+                    VerSpeedMagnitude = Math.Abs(VerSpeed[0]);
+                    if (VerSpeedMagnitude > VerSpeedLimit)
+                        VerSpeedMagnitude = VerSpeedLimit;
+                    if (VerSpeedMagnitude < VerSpeedMinimum)
+                        VerSpeedMagnitude = VerSpeedMinimum;
+                    VerMessage = "H";
+                    if (isVerDown)
+                        VerMessage += "+";
+                    else
+                        VerMessage += "-";
+
+                    VerMessage += "A" + VerAccel.ToString("F2") + " V" + VerSpeedMagnitude.ToString("F5") + " G\r";
+                    VerPort.Write(VerMessage);
+                }
+#endregion
+#region Update Spindle Speed
+                if (SpiSpeed[0] != SpiSpeed[1])
+                {
+                    isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
+                    SpiSpeedMagnitude = Math.Abs(SpiSpeed[0]);
+                    if (SpiSpeedMagnitude > 100)
+                        isLubWanted = true;
+                    else
+                        isLubWanted = false;
+                    //Limit Spindle speed
+                    if (SpiSpeedMagnitude > SpiSpeedLimit) SpiSpeedMagnitude = SpiSpeedLimit;
+                    if (isSpiSpeedCW)
+                    {
+                        if (!isSpiCW)
+                        {
+                            StartSpiCW();
+                            isSpiCW = true;
+                        }
+                        SpiMessage = "CW";
+                    }
+                    else
+                    {
+                        if (isSpiCW)
+                        {
+                            StartSpiCCW();
+                            isSpiCW = false;
+                        }
+                        SpiMessage = "CCW";
+                    }
+                    ChangeSpiRef(SpiSpeedMagnitude);
+                    WriteMessageQueue("Spi set to:" + SpiSpeedMagnitude.ToString("F0") + SpiMessage);
+
+                }
+                #endregion
+#if NOT_USING_ANALOG_CONTROL
+                Thread.Sleep(30);
+#else
+                Thread.Sleep(10);
+#endif
+            }
+            StopAllMotors();
+            isLubWanted = false;
+            btnZzero_Click(new object(), new EventArgs());
+            Program.Safetyfrm.UpdateLimitsSafe();
+            WriteModbusQueue(3, 0x0300, 04, false);//give lateral motor master frequency control to rs-485
+            WriteModbusQueue(3, 0x0301, 03, false);//give lateral motor Source of operation command  to rs-485
+            WriteModbusQueue(3, 0x0705, 0, false);//set lateral speed to zero
+            WriteModbusQueue(2, 0x0300, 04, false);//give Traverse motor master frequency control to rs-485
+            WriteModbusQueue(2, 0x0301, 03, false);//give Traverse motor Source of operation command  to rs-485
+            WriteModbusQueue(2, 0x0705, 0, false);//set Traverse speed to zero
+            SoftStop = 0;
+            Thread.Sleep(25);
+            isSimControl = false;
+            WriteMessageQueue("SimulinkRecieve Completed");
+            try { ControlSemaphore.Release(1); }
+            catch (System.Threading.SemaphoreFullException ex)
+            {
+                MessageBox.Show("error releasing ControlSemaphore 3 " + ex.Message.ToString());
+            }
+            
+
+        }
         //Thread 'WriteModbus' that manages the commands given to the motors controled on the modbus
-        #region Modbus functions
+#region Modbus functions
         ////Helper function to compute checksum
         ulong crc_chk(byte[] data, int length)
         {
@@ -482,17 +952,24 @@ namespace MysteryBoxWorkaround
             byte[] RSMessage = { 0, 0, 0, 0, 0, 0, 0, 0 };
             while (true)
             {
-                ModBusQueueSemaphore.WaitOne();//wait on something to be put into motor comand queue
-                ModBusQueueMutex.WaitOne();
-                RSMessage = (byte[])ModBusQueue.Dequeue();
-                ModBusQueueMutex.Release();
+                    ModBusQueueSemaphore.WaitOne();//wait on something to be put into motor comand queue
+                    ModBusQueueMutex.WaitOne();
+                    RSMessage = (byte[])ModBusQueue.Dequeue();
+                    
+                try { ModBusQueueMutex.Release(); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing ModBusQueueMutex 3 " + ex.Message.ToString());
+                }
                 ModbusPort.Write(RSMessage, 0, 8);
-                Thread.Sleep(30);//wait for a period of at least 25ms to send comands to motors on the modbus,
+
+                Thread.Sleep(25);//wait for a period of at least 25ms to send comands to motors on the modbus,
                 // commands seem to be dropped if sent any faster. J 9/10/2015
             }
         }
         bool WriteModbusQueue(int motor, int address, int data, bool checkreturn)
         {
+            //Info for how this talks to the motor diver can be seen in Table 5-1 Communication Mapping Table on the mvx9000 data sheet for the lateral and traverse motor drivers
             int motorreturned = 0;
             //For write modbus
             byte[] Returned= { 0, 0, 0, 0, 0, 0, 0, 0 };//delete
@@ -501,12 +978,19 @@ namespace MysteryBoxWorkaround
             //some local declarations
             ulong chkval;
 
+            //(address >> 8) this is a bit shift right by 8 bits, used to grab bits 8-15 of the int
+            //(data & 0xFF) bit and operation that preserves only the lower 8 bits, bits 0-7 of the int
+
             //Slave ID and function code
+            //This byte is the motor address can be found on the menu 90.02 on the mvx9000
+            //byte is also motor adress for the svx9000
             RSMessage[0] = (byte)motor;
+            //This is the length of the message for mvx9000 
+            //This is the function for the svx9000  0x06 is for write single register
             RSMessage[1] = (byte)0x06;
 
             //Address
-            RSMessage[2] = (byte)(address >> 8);
+            RSMessage[2] = (byte)(address >> 8);//see table 5-1 mvx9000
             RSMessage[3] = (byte)(address & 0xFF);
 
             //Data
@@ -527,8 +1011,18 @@ namespace MysteryBoxWorkaround
                 //Send to Queue
                 ModBusQueueMutex.WaitOne();
                 ModBusQueue.Enqueue(RSMessage);
-                ModBusQueueMutex.Release();
-                ModBusQueueSemaphore.Release(1);//tell other thread message is available
+                try { ModBusQueueMutex.Release(); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing ModBusQueueMutex 4 " + ex.Message.ToString());
+                }
+
+                //tell other thread message is available
+                try { ModBusQueueSemaphore.Release(1); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing ModBusQueueSemaphore 3 " + ex.Message.ToString());
+                }
             }
 
             if (checkreturn)
@@ -548,20 +1042,28 @@ namespace MysteryBoxWorkaround
                         motorreturned = Returned[0];
                         if (motor == motorreturned)
                         {
-                            ModBusQueueMutex.Release();
+                            try { ModBusQueueMutex.Release(); }
+                            catch (System.Threading.SemaphoreFullException ex)
+                            {
+                                MessageBox.Show("error releasing ModBusQueueMutex 5 " + ex.Message.ToString());
+                            }
                             return true;
                         }
                     }
                     Thread.Sleep(20);
                 }
-                ModBusQueueMutex.Release();
+                try { ModBusQueueMutex.Release(); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing ModBusQueueMutex 6 " + ex.Message.ToString());
+                }
                 return false;
             }
             return true;
         }
-        #endregion
-        #endregion
-        #region Vertical Motor functions
+#endregion
+#endregion
+#region Vertical Motor functions
         void btnVerRun_Click(object sender, EventArgs e)
         {
             String VerMessage;
@@ -680,17 +1182,22 @@ namespace MysteryBoxWorkaround
         {
             VerPort.Write("S\r");
         }
-        #endregion
-        #region Traverse Motor functions
+#endregion
+#region Traverse Motor functions
         void btnTraCon_Click(object sender, EventArgs e)
         {
             if (!isTraCon)
             {
                 //attempt to sync with motor
-                    double hz = ((double)nmTraIPM.Value) * 5.3333;
+                
+                double hz = ((double)nmTraIPM.Value) * 5.3333;
                     if (WriteModbusQueue(2, 1798, 1, true))
                     {
-                        isTraCon = true;
+                    WriteModbusQueue(2, 0x0300, 04, false);//give Traverse motor master frequency control to rs-485
+                    WriteModbusQueue(2, 0x0301, 03, false);//give Traverse motor Source of operation command  to rs-485
+                    WriteModbusQueue(2, 0x0705, 0, false);//set Traverse speed to zero
+                    WriteModbusQueue(2, 0x010D, 0, false);//set Traverse motor direcction (Fwd/Rev) to be controled by rs-485
+                    isTraCon = true;
                         btnTraCon.BackColor = Color.Green;
                         boxTrav.Visible = true;
                     }
@@ -702,20 +1209,12 @@ namespace MysteryBoxWorkaround
             else
             {
                 //Stop the motor
-                //onTraStop(new object(), new EventArgs());
+                StopTra();
 
                 isTraCon = false;
                 btnTraCon.BackColor = Color.Red;
                 boxTrav.Visible = false;
             }
-        }
-        void btnTraConnect()
-        {
-
-        }
-        void btnTraDisconnect()
-        {
-
         }
         void btnTraRun_Click(object sender, EventArgs e)
         {
@@ -752,7 +1251,7 @@ namespace MysteryBoxWorkaround
         {
             //if (isTraCon) Dont check to see if its connected safer to just try to stop it incase someting messes up
             {
-                WriteModbusQueue(2, 1798, 1, false);
+                WriteModbusQueue(2, 0x0706, 1, false);
                 isTraOn = false;
             }
         }
@@ -776,7 +1275,7 @@ namespace MysteryBoxWorkaround
         {
             if (isTraCon)
             {
-                WriteModbusQueue(2, 1798, 18, false);
+                WriteModbusQueue(2, 0x0706, 0x12, false);
                 isTraOn = true;
             }
             else
@@ -788,7 +1287,7 @@ namespace MysteryBoxWorkaround
         {
             if (isTraCon)
             {
-                WriteModbusQueue(2, 1798, 34, false);
+                WriteModbusQueue(2, 0x0706, 0x22, false);
                 isTraOn = true;
             }
             else
@@ -796,8 +1295,8 @@ namespace MysteryBoxWorkaround
                 StopTra();
             }
         }
-        #endregion
-        #region Lateral Motor functions
+#endregion
+#region Lateral Motor functions
         void btnLatCon_Click(object sender, EventArgs e)
         {
             if (!isLatCon)
@@ -806,8 +1305,12 @@ namespace MysteryBoxWorkaround
                 double hz = (double)nmLatIPM.Value;
                 int sendhz = (int)(hz * 10);
 
-                if (WriteModbusQueue(3, 1797, sendhz, true))
+                if (WriteModbusQueue(3, 0x0706, 1, true))
                 {
+                    WriteModbusQueue(3, 0x0300, 04, false);//give lateral motor master frequency control to rs-485
+                    WriteModbusQueue(3, 0x0301, 03, false);//give lateral motor Source of operation command  to rs-485
+                    WriteModbusQueue(3, 0x010D, 0, false);//set Traverse motor direcction (Fwd/Rev) to be controled by rs-485
+                    WriteModbusQueue(3, 0x0705, 0, false);//set lateral speed to zero
                     isLatCon = true;
                     btnLatCon.BackColor = Color.Green;
                     boxLat.Visible = true;
@@ -862,39 +1365,19 @@ namespace MysteryBoxWorkaround
             {
                 double LatinRPM = IPM * 54.5;
                 double hz = LatinRPM / 60.0;
-                WriteModbusQueue(3, 1797, ((int)(hz * 10)), false);
+                WriteModbusQueue(3, 0x0705, ((int)(hz * 10)), false);
             }
         }
         void StopLat()//Stop the lateral Motor
         {
-            WriteModbusQueue(3, 1798, 1, false);
+            WriteModbusQueue(3, 0x0706, 1, false);
             isLatOn = false;
         }
         void StartLatIn()//Start the lateral motor going inward
         {
             if (isLatCon)
             {
-                /* Old code for dealing with backlash maybe?
-                //take the mutex
-                LatEncMutex.WaitOne();
-
-                //reset LateralEncoder
-                //myTask.Stop();
-                //myTask.Start();
-                //grab hold point
-                LatEncCountHoldPoint = myCounterReader.ReadSingleSampleInt32();
-
-                //Store some values
-                LatEncBackLashHold = LatEncBackLash;
-                LatEncBackLashLoss = LatEncBackLash * LatEncRatio;
-                LatEncLocHold = LatEncLoc;
-                LatEncRotHold = LatEncRot;
-
-                //release the mutex
-                LatEncMutex.ReleaseMutex();
-                */
-
-                WriteModbusQueue(3, 1798, 18, false);
+                WriteModbusQueue(3, 0x0706, 0x12, false);
                 isLatOn = true;
                 isLatIn = true;
             }
@@ -908,27 +1391,7 @@ namespace MysteryBoxWorkaround
         {
             if (isLatCon)
             {
-                /* Old code for dealing with backlash?
-                //take the mutex
-                LatEncMutex.WaitOne();
-
-                //reset LateralEncoder
-                //myTask.Stop();
-                //myTask.Start();
-                //grab hold point
-                LatEncCountHoldPoint = myCounterReader.ReadSingleSampleInt32();
-
-                //Store some values
-                LatEncBackLashHold = LatEncBackLash;
-                LatEncBackLashLoss = (LatEncBackLashWidth - LatEncBackLash) * LatEncRatio;
-                LatEncLocHold = LatEncLoc;
-                LatEncRotHold = LatEncRot;
-
-                //release the mutex
-                LatEncMutex.ReleaseMutex();
-                */
-
-                WriteModbusQueue(3, 1798, 34, false);
+                WriteModbusQueue(3, 0x0706, 0x22, false);
                 isLatOn = true;
                 isLatIn = false;
             }
@@ -937,8 +1400,8 @@ namespace MysteryBoxWorkaround
                 StopLat();
             }
         }
-        #endregion
-        #region Spindle Motor functions
+#endregion
+#region Spindle Motor functions
         void btnSpiCon_Click(object sender, EventArgs e)
         {
             if (!isSpiCon)
@@ -1049,8 +1512,8 @@ namespace MysteryBoxWorkaround
                 StopSpi();
             }
         }
-        #endregion
-        #region MysteryBox
+#endregion
+#region MysteryBox
         void btnBoxCon_Click(object sender, EventArgs e)
         {
             if (!isSenCon)
@@ -1148,10 +1611,14 @@ namespace MysteryBoxWorkaround
                 MessageBox.Show(ex.Message.ToString(), "Mystery Box Connect Error");
             }
             WriteMessageQueue("MysteryBoxConnect Completed");
-            ControlSemaphore.Release(1);
+            try { ControlSemaphore.Release(1); }
+            catch (System.Threading.SemaphoreFullException ex)
+            {
+                MessageBox.Show("error releasing ControlSemaphore 4 " + ex.Message.ToString());
+            }
         }
-        #endregion
-        #region DynoFunctions
+#endregion
+#region DynoFunctions
         private void btnDynCon_Click(object sender, EventArgs e)
         {
             if (!isDynCon)
@@ -1199,6 +1666,7 @@ namespace MysteryBoxWorkaround
             return ((double)a * 10.0 / 65535.0 - 5);
         }
         #endregion
+
         #region GUI Helper functions
         void GUI_FormClosing(object sender, FormClosingEventArgs e)
         {
@@ -1217,6 +1685,9 @@ namespace MysteryBoxWorkaround
         }
         void timer1_Tick(object sender, EventArgs e)
         {
+            lblTemp1.Text = LatMagLoc.ToString("F1");
+            lblTemp2.Text = TraMagLoc.ToString("F1");
+            lblTemp3.Text = VerMagLoc.ToString("F1");
             if (isSetVerWeld)
             {
                 nmVerWeld.Value = (decimal)VerLoc;
@@ -1288,13 +1759,21 @@ namespace MysteryBoxWorkaround
             }
             return mes;
         }
+
+
+
         public void WriteMessageQueue(string message)
         {
             message = message + "\r\n";
             MessageQueueMutex.WaitOne();
             MessageQueue.Enqueue(message);
             MessageQueueMutex.ReleaseMutex();
-            MessageQueueSemaphore.Release(1);
+            try { MessageQueueSemaphore.Release(1); }
+            catch (System.Threading.SemaphoreFullException ex)
+            {
+                MessageBox.Show("error releasing MessageQueueSemaphore 5 " + ex.Message.ToString());
+            }
+
         }
         private void GUI_FormLoading(object sender, EventArgs e)
         {
@@ -1304,11 +1783,11 @@ namespace MysteryBoxWorkaround
         }
 
 
-        #endregion
-        #region Safety functions
+#endregion
+#region Safety functions
         void SafetyCheck()
         {
-            #region Check Safety Limits
+#region Check Safety Limits
             if (isSenCon)
             {
                 if ((VerLoc > VerMax || VerLoc < VerMin) && !isAlarm)
@@ -1335,15 +1814,15 @@ namespace MysteryBoxWorkaround
                 if (ZForce > MaxZForce && !isAlarm)
                     onAlarm("ZForce limit exceeded");
             }
-            #endregion
-            #region Update Max Histories
+#endregion
+#region Update Max Histories
             if (ZForce > ZMaxHistory)
                 ZMaxHistory = ZForce;
             if (XYForce > MaxXYForceHistory)
                 MaxXYForceHistory = XYForce;
             if (Math.Abs(TForce) > MaxTForceHistory)
                 MaxTForceHistory = Math.Abs(TForce);
-            #endregion
+#endregion
         }
         void onAlarm(string Message)
         {
@@ -1352,17 +1831,13 @@ namespace MysteryBoxWorkaround
                 isAlarm = true;
                 //Kill Process
                 StopControlThread();
-                if (isVerCon){ StopVer();}//stop the vertical motor if connected
-                if (isTraCon){StopTra();}//stop the traverse motor
-                if (isLatCon){StopLat();}
-                if (isSpiCon){StopSpi();}//stop the spindle motor
+                StopAllMotors();
 
+                if (isVerCon) { StopVer();}//stop the vertical motor if connected
+                if (isTraCon) { StopTra(); btnTraCon_Click(new object(), new EventArgs()); }//stop the traverse motor
+                if (isLatCon) { StopLat(); btnLatCon_Click(new object(), new EventArgs()); }
+                if (isSpiCon) { StopSpi(); btnSpiCon_Click(new object(), new EventArgs()); }//stop the spindle motor
 
-                //Reset the motor speeds
-                //Reset spindle, traverse and lateral speeds
-                if (isSpiCon) {ChangeSpiRef(0.0); }//set speed to 0
-                if (isTraCon){ChangeTraRef(0.0);}
-                if (isLatCon) {ChangeLatRef(0.0);}
                 StopAllMotors();
                 WriteMessageQueue("Error:"+Message);//for debug
             }
@@ -1402,14 +1877,22 @@ namespace MysteryBoxWorkaround
                 btnAbort.ForeColor = SystemColors.ControlText;
                 btnAbort.Text = "Stop Abort";
                 if (isVerCon) { StopVer(); }//stop the vertical motor if connected
-                if (isTraCon) { StopTra(); }//stop the traverse motor
-                if (isLatCon) { StopLat(); }
-                if (isSpiCon) { StopSpi(); }//stop the spindle motor
+                if (isTraCon) { StopTra(); btnTraCon_Click(new object(), new EventArgs()); }//stop the traverse motor
+                if (isLatCon) { StopLat(); btnLatCon_Click(new object(), new EventArgs()); }
+                if (isSpiCon) { StopSpi(); btnSpiCon_Click(new object(), new EventArgs()); }//stop the spindle motor
                 isLubWanted = false;
                 isSimControl = false;
                 StopControlThread();
                 StopAllMotors();//stop one more time just in case?
                 MatlabExecute("set_param(bdroot(gcs), 'SimulationCommand', 'stop');");//stop matlab simulation
+                if (USB6008_1_Mutex.WaitOne(1))
+                {
+                    try { USB6008_1_Mutex.Release(); }
+                    catch (System.Threading.SemaphoreFullException ex)
+                    {
+                        MessageBox.Show("error releasing USB6008_1_Mutex 1 " + ex.Message.ToString());
+                    }
+                }
             }
             else
             {
@@ -1417,21 +1900,33 @@ namespace MysteryBoxWorkaround
                 btnAbort.BackColor = Color.Red;
                 btnAbort.ForeColor = Color.White;
                 btnAbort.Text = "Abort";
+                if (USB6008_1_Mutex.WaitOne(1))
+                {
+                    USB6008_1_Mutex.Release();
+                }
             }
         }
         void StopControlThread()
         {
-            if (ControlSemaphore.WaitOne(0))
+            if (ControlSemaphore.WaitOne(5))
             {
                 //if mutex can be grabed, no control threads should be running
-                ControlSemaphore.Release(1);
+                try { ControlSemaphore.Release(1);}
+                catch(System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing control semaphore 1 " + ex.Message.ToString());
+                }
             }
             else
             {
                 //if mutex can not grabed the thread should abort 
                 MachineControlThread.Abort();
                 WriteMessageQueue("Thread Aborted");
-                ControlSemaphore.Release(1);
+                try { ControlSemaphore.Release(1); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing control semaphore 2 " + ex.Message.ToString());
+                }
             }
         }
         public void StopAllMotors()
@@ -1441,7 +1936,7 @@ namespace MysteryBoxWorkaround
             StopLat();
             StopTra();
         }
-        #endregion
+#endregion
         private void btnZzero_Click(object sender, EventArgs e)
         {
             double ZoffestTemp = 0;
@@ -1452,7 +1947,15 @@ namespace MysteryBoxWorkaround
             }
             for (int i = 0; i < 5; i++)
             {
-                Zoffset1[i] = strainReader.ReadSingleSample()[0];
+                try {
+                    USB6008_1_Mutex.WaitOne();
+                    Zoffset1[i] = USB6008_1_Reader.ReadSingleSample()[0];
+                    USB6008_1_Mutex.Release();
+                }
+                catch(NationalInstruments.DAQmx.DaqException ex)
+                {
+                    MessageBox.Show("Error Reading Analog input for zero button " + ex.Message.ToString());
+                }
                 ZoffestTemp += Zoffset1[i];
                 Thread.Sleep(5);
             }
@@ -1614,7 +2117,12 @@ namespace MysteryBoxWorkaround
                 StopVer();
                 UpdateLimitValues();
                 WriteMessageQueue("AutoAutoZero Completed");
-                ControlSemaphore.Release(1);
+                
+                try { ControlSemaphore.Release(1); }
+                catch (System.Threading.SemaphoreFullException ex)
+                {
+                    MessageBox.Show("error releasing ControlSemaphore 6 " + ex.Message.ToString());
+                }
 
             }
 
@@ -1626,243 +2134,56 @@ namespace MysteryBoxWorkaround
             else
                 return false;
         }
-        public void SimulinkReciveLoop()
-        {
-            Program.Safetyfrm.UpdateLimitsWelding();
-            bool isSimDone = false;
-            isSimControl = true;
-            Byte[] RecieveBytes = new Byte[256];
-            double tempvar;
-            #region Traverse
-            bool isTrafor;
-            bool isTraSpeedPositive = true;
-            double[] TraSpeed = new double[2];
-            double TraSpeedMagnitude = 0;
-            double TraSpeedLimit = 12;
-            ChangeTraRef(0);
-            #endregion
-            #region Lateral
-            bool isLatout;
-            bool isLatSpeedPositive = true;
-            double[] LatSpeed = new double[2];
-            double LatSpeedMagnitude = 0;
-            double LatSpeedLimit = 12;
-            ChangeLatRef(0);
-            #endregion
-            #region Vertical
-            string VerMessage;
-            bool isVerDown = true;
-            double VerSpeedMagnitude = 0;
-            double[] VerSpeed = new double[2];
-            double VerSpeedLimit = 5;
-            double VerAccel = 10;
-            double VerSpeedMinimum = 0.00001;//from motor guide
-            VerMessage = "E MC ";
-            VerPort.Write(VerMessage);
-            #endregion
-            #region Spindle
-            string SpiMessage;
-            bool isSpiCW = true;
-            bool isSpiSpeedCW = true;
-            double SpiSpeedMagnitude = 0;
-            double[] SpiSpeed = new double[2];
-            double SpiSpeedLimit = 2000;
-            ChangeSpiRef(0);
-            StartSpiCW();
-            #endregion
-            while (SimulinkReviceUDP.Available > 0)//clear udp buffer, want to recieve latest packet
-            {
-                RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-            }
-            RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-            TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
-            LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
-            VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
-            SpiSpeed[0] = BitConverter.ToDouble(RecieveBytes, 24);
-            #region Initialize Traverse Speed
-            isTraSpeedPositive = trueifpositive(TraSpeed[0]);
-            if (isTraSpeedPositive)
-            {
-                StartTraFor();
-                isTrafor = true;
-            }
-            else
-            {
-                StartTraRev();
-                isTrafor = false;
-            }
-            #endregion
-            #region Initialize Lateral Speed
-            isLatSpeedPositive = trueifpositive(LatSpeed[0]);
-            if (isLatSpeedPositive)
-            {
-                StartLatOut();
-                isLatout = true;
-            }
-            else
-            {
-                StartLatIn();
-                isLatout = false;
-            }
-            #endregion
-            #region Initialize Spindle Speed
-            isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
-            if (isSpiSpeedCW)
-            {
-                StartSpiCW();
-                isSpiCW = true;
-            }
-            else
-            {
-                StartSpiCCW();
-                isSpiCW = false;
-            }
-            #endregion
-            TraSpeed[0] = -99.9;
-            LatSpeed[0] = -99.9; 
-            VerSpeed[0] = -99.9; 
-            SpiSpeed[0] = -99.9; 
-            while (!isAbort&&!isSimDone&&!isAlarm)
-            {
-                while (SimulinkReviceUDP.Available > 0)//clear udp buffer, want to recieve latest packet
-                {
-                    RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-                }
-                RecieveBytes = SimulinkReviceUDP.Receive(ref IPRecivefromSimulink);
-                TraSpeed[1] = TraSpeed[0];
-                TraSpeed[0] = BitConverter.ToDouble(RecieveBytes, 0);
-                LatSpeed[1] = LatSpeed[0];
-                LatSpeed[0] = BitConverter.ToDouble(RecieveBytes, 8);
-                VerSpeed[1] = VerSpeed[0];
-                VerSpeed[0] = BitConverter.ToDouble(RecieveBytes, 16);
-                SpiSpeed[1] = SpiSpeed[0];
-                SpiSpeed[0]= BitConverter.ToDouble(RecieveBytes, 24);
-                tempvar = BitConverter.ToDouble(RecieveBytes, 32);
-                isSimDone = System.Convert.ToBoolean(tempvar);
-                #region Updatae Traverse Speed
-                if (TraSpeed[0] != TraSpeed[1])
-                {
-                    isTraSpeedPositive = trueifpositive(TraSpeed[0]);
-                    TraSpeedMagnitude = Math.Abs(TraSpeed[0]);
-                    //Saturate Traverse speed
-                    if (TraSpeedMagnitude > TraSpeedLimit) TraSpeedMagnitude = TraSpeedLimit;
-                    if (isTraSpeedPositive)
-                    {
-                        if (!isTrafor)
-                        {
-                            StartTraFor();
-                            isTrafor = true;
-                        }
-                    }
-                    else
-                    {
-                        if (isTrafor)
-                        {
-                            StartTraRev();
-                            isTrafor = false;
-                        }
-                    }
-                    ChangeTraRef(TraSpeedMagnitude);
-                }
-                #endregion
-                #region Update Lateral Speed
-                if (LatSpeed[0] != LatSpeed[1])
-                {
-                    isLatSpeedPositive = trueifpositive(LatSpeed[0]);
-                    LatSpeedMagnitude = Math.Abs(LatSpeed[0]);
-                    //Limit Latverse speed
-                    if (LatSpeedMagnitude > LatSpeedLimit) LatSpeedMagnitude = LatSpeedLimit;
-                    if (isLatSpeedPositive)
-                    {
-                        if (!isLatout)
-                        {
-                            StartLatOut();
-                            isLatout = true;
-                        }
-                    }
-                    else
-                    {
-                        if (isLatout)
-                        {
-                            StartLatIn();
-                            isLatout = false;
-                        }
-                    }
-                    ChangeLatRef(LatSpeedMagnitude);
-                }
-                #endregion
-                #region Update Vertical Speed
-                if (VerSpeed[0] != VerSpeed[1])
-                {
-                    isVerDown = trueifpositive(VerSpeed[0]);
-                    VerSpeedMagnitude = Math.Abs(VerSpeed[0]);
-                    if (VerSpeedMagnitude > VerSpeedLimit)
-                        VerSpeedMagnitude = VerSpeedLimit;
-                    if (VerSpeedMagnitude < VerSpeedMinimum)
-                        VerSpeedMagnitude = VerSpeedMinimum;
-                    VerMessage = "H";
-                    if (isVerDown)
-                        VerMessage += "+";
-                    else
-                        VerMessage += "-";
 
-                    VerMessage += "A" + VerAccel.ToString("F2") + " V" + VerSpeedMagnitude.ToString("F5") + " G\r";
-                    VerPort.Write(VerMessage);
-                }
-                #endregion
-                #region Update Spindle Speed
-                if (SpiSpeed[0] != SpiSpeed[1])
-                {
-                    isSpiSpeedCW = trueifpositive(SpiSpeed[0]);
-                    SpiSpeedMagnitude = Math.Abs(SpiSpeed[0]);
-                    if (SpiSpeedMagnitude > 100)
-                        isLubWanted = true;
-                    else
-                        isLubWanted = false;
-                    //Limit Spindle speed
-                    if (SpiSpeedMagnitude > SpiSpeedLimit) SpiSpeedMagnitude = SpiSpeedLimit;
-                    if (isSpiSpeedCW)
-                    {
-                        if (!isSpiCW)
-                        {
-                            StartSpiCW();
-                            isSpiCW = true;
-                        }
-                        SpiMessage = "CW";
-                    }
-                    else
-                    {
-                        if (isSpiCW)
-                        {
-                            StartSpiCCW();
-                            isSpiCW = false;
-                        }
-                        SpiMessage = "CCW";
-                    }
-                    ChangeSpiRef(SpiSpeedMagnitude);
-                    WriteMessageQueue("Spi set to:" + SpiSpeedMagnitude.ToString("F0") + SpiMessage);
+        private void calibrateMagneticSensorsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
 
-                }
-                #endregion
-                Thread.Sleep(5);
+        }
+        private void analogControlToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            WriteModbusQueue(2, 0x0300, 02, false);//set source of master frequency to be from analog input for Traverse motor
+            WriteModbusQueue(2, 0x010D, 15, false);//set Traverse motor direcction (Fwd/Rev) to be controled digital input terminal DI5
+            WriteModbusQueue(2, 0x0706, 0x02, false);//set Traverse motor to run, but not to set dirrection
+                                                     //30.02 0.0 minimum reverence value 0 to 10 Volts
+                                                     //30.02 10.0 maximum reverence value 0 to 10 Volts
+                                                     //30.03 00 Invert Reverence signal, not inverted
+                                                     //30.07 00 potentiometer offset 0.0-100.0, 0 offset
+                                                     //30.10 00 potentiometer Direction, 00 do not have voltage value control direction
+
+
+            WriteModbusQueue(3, 0x0300, 02, false);//set source of master frequency to be from analog input for lateral motor
+            WriteModbusQueue(3, 0x010D, 15, false);//set lateral motor direcction (Fwd/Rev) to be controled digital input terminal DI5
+            WriteModbusQueue(3, 0x0706, 0x02, false);//set lateral motor to run, but not to set dirrection
+
+        }
+        private void simulinkControlToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ControlThreadStarter(SimulinkReciveLoop, "Simulink Recieve");
+        }
+        private void weldToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DirectoryInfo d = new DirectoryInfo(@"C:\Users\J\Desktop\Weld Param Forms");//Assuming Test is your Folder
+            FileInfo[] Files = d.GetFiles("*.txt"); //Getting Text files
+            string[] str = new string[50];
+            ToolStripMenuItem[] items = new ToolStripMenuItem[50];
+            int i = 0;
+            weldToolStripMenuItem.DropDownItems.Clear();
+            foreach (FileInfo file in Files)
+            {
+                str[i] = file.Name;
+                items[i] = new ToolStripMenuItem();
+                items[i].Name = "dynamicItem";
+                items[i].Tag = "specialDataHere";
+                items[i].Text = Path.GetFileNameWithoutExtension(str[i]); ;
+                items[i].Click += new EventHandler(MenuItemClickHandler);
+                weldToolStripMenuItem.DropDownItems.Add(items[i]);
+                i++;
             }
-            StopAllMotors();
-            isLubWanted = false;
-            btnZzero_Click(new object(), new EventArgs());
-            Program.Safetyfrm.UpdateLimitsSafe();
-            Thread.Sleep(25);
-            isSimControl = false;
-            WriteMessageQueue("SimulinkRecieve Completed");
-            ControlSemaphore.Release(1);
         }
-        private void OpenTrackingWeldfrm(object sender, EventArgs e)
+        private void MenuItemClickHandler(object sender, EventArgs e)
         {
-            TrackingSimcs frm = new TrackingSimcs();
-            frm.Show();
-        }
-        private void OpenLinearWeldfrm(object sender, EventArgs e)
-        {
-            LinearWeldcs frm = new LinearWeldcs();
+            ToolStripMenuItem item = (ToolStripMenuItem)sender;
+            WeldGUIForm frm = new WeldGUIForm(item.Text);
             frm.Show();
         }
     }

@@ -55,6 +55,9 @@ namespace MysteryBoxWorkaround
             this.btnDynCon = new System.Windows.Forms.Button();
             this.btnSenCon = new System.Windows.Forms.Button();
             this.BoxMotors = new System.Windows.Forms.GroupBox();
+            this.lblTemp3 = new System.Windows.Forms.Label();
+            this.lblTemp2 = new System.Windows.Forms.Label();
+            this.lblTemp1 = new System.Windows.Forms.Label();
             this.boxSpi = new System.Windows.Forms.GroupBox();
             this.nmSpiRPM = new System.Windows.Forms.NumericUpDown();
             this.rbSpiCW = new System.Windows.Forms.RadioButton();
@@ -129,10 +132,11 @@ namespace MysteryBoxWorkaround
             this.lblZForce = new System.Windows.Forms.Label();
             this.menuStrip1 = new System.Windows.Forms.MenuStrip();
             this.weldToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.linearToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.spotToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.trackingToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.safetyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.testToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.calibrateMagneticSensorsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.analogControlToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.simulinkControlToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.groupBox1.SuspendLayout();
             this.BoxMotors.SuspendLayout();
             this.boxSpi.SuspendLayout();
@@ -257,6 +261,9 @@ namespace MysteryBoxWorkaround
             // 
             // BoxMotors
             // 
+            this.BoxMotors.Controls.Add(this.lblTemp3);
+            this.BoxMotors.Controls.Add(this.lblTemp2);
+            this.BoxMotors.Controls.Add(this.lblTemp1);
             this.BoxMotors.Controls.Add(this.boxSpi);
             this.BoxMotors.Controls.Add(this.boxTrav);
             this.BoxMotors.Controls.Add(this.boxLat);
@@ -267,6 +274,36 @@ namespace MysteryBoxWorkaround
             this.BoxMotors.TabIndex = 13;
             this.BoxMotors.TabStop = false;
             this.BoxMotors.Text = "Motor Controls";
+            // 
+            // lblTemp3
+            // 
+            this.lblTemp3.AutoSize = true;
+            this.lblTemp3.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblTemp3.Location = new System.Drawing.Point(478, 255);
+            this.lblTemp3.Name = "lblTemp3";
+            this.lblTemp3.Size = new System.Drawing.Size(16, 16);
+            this.lblTemp3.TabIndex = 38;
+            this.lblTemp3.Text = "0";
+            // 
+            // lblTemp2
+            // 
+            this.lblTemp2.AutoSize = true;
+            this.lblTemp2.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblTemp2.Location = new System.Drawing.Point(478, 235);
+            this.lblTemp2.Name = "lblTemp2";
+            this.lblTemp2.Size = new System.Drawing.Size(16, 16);
+            this.lblTemp2.TabIndex = 37;
+            this.lblTemp2.Text = "0";
+            // 
+            // lblTemp1
+            // 
+            this.lblTemp1.AutoSize = true;
+            this.lblTemp1.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblTemp1.Location = new System.Drawing.Point(478, 216);
+            this.lblTemp1.Name = "lblTemp1";
+            this.lblTemp1.Size = new System.Drawing.Size(16, 16);
+            this.lblTemp1.TabIndex = 36;
+            this.lblTemp1.Text = "0";
             // 
             // boxSpi
             // 
@@ -825,7 +862,7 @@ namespace MysteryBoxWorkaround
             // 
             this.label5.AutoSize = true;
             this.label5.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label5.Location = new System.Drawing.Point(221, 14);
+            this.label5.Location = new System.Drawing.Point(280, 16);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(39, 13);
             this.label5.TabIndex = 125;
@@ -836,7 +873,7 @@ namespace MysteryBoxWorkaround
             // 
             this.lblTHistory.AutoSize = true;
             this.lblTHistory.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblTHistory.Location = new System.Drawing.Point(256, 14);
+            this.lblTHistory.Location = new System.Drawing.Point(315, 16);
             this.lblTHistory.Name = "lblTHistory";
             this.lblTHistory.Size = new System.Drawing.Size(16, 16);
             this.lblTHistory.TabIndex = 123;
@@ -846,7 +883,7 @@ namespace MysteryBoxWorkaround
             // 
             this.lblXYHistory.AutoSize = true;
             this.lblXYHistory.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblXYHistory.Location = new System.Drawing.Point(151, 15);
+            this.lblXYHistory.Location = new System.Drawing.Point(210, 17);
             this.lblXYHistory.Name = "lblXYHistory";
             this.lblXYHistory.Size = new System.Drawing.Size(16, 16);
             this.lblXYHistory.TabIndex = 123;
@@ -856,7 +893,7 @@ namespace MysteryBoxWorkaround
             // 
             this.label4.AutoSize = true;
             this.label4.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label4.Location = new System.Drawing.Point(116, 16);
+            this.label4.Location = new System.Drawing.Point(175, 18);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(38, 13);
             this.label4.TabIndex = 124;
@@ -866,7 +903,7 @@ namespace MysteryBoxWorkaround
             // btnResetHistory
             // 
             this.btnResetHistory.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.btnResetHistory.Location = new System.Drawing.Point(326, 11);
+            this.btnResetHistory.Location = new System.Drawing.Point(0, 13);
             this.btnResetHistory.Name = "btnResetHistory";
             this.btnResetHistory.Size = new System.Drawing.Size(60, 24);
             this.btnResetHistory.TabIndex = 122;
@@ -878,7 +915,7 @@ namespace MysteryBoxWorkaround
             // 
             this.lblZHistory.AutoSize = true;
             this.lblZHistory.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblZHistory.Location = new System.Drawing.Point(41, 14);
+            this.lblZHistory.Location = new System.Drawing.Point(100, 16);
             this.lblZHistory.Name = "lblZHistory";
             this.lblZHistory.Size = new System.Drawing.Size(16, 16);
             this.lblZHistory.TabIndex = 43;
@@ -888,7 +925,7 @@ namespace MysteryBoxWorkaround
             // 
             this.label116.AutoSize = true;
             this.label116.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label116.Location = new System.Drawing.Point(6, 16);
+            this.label116.Location = new System.Drawing.Point(65, 18);
             this.label116.Name = "label116";
             this.label116.Size = new System.Drawing.Size(31, 13);
             this.label116.TabIndex = 43;
@@ -1153,42 +1190,20 @@ namespace MysteryBoxWorkaround
             // 
             this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.weldToolStripMenuItem,
-            this.safetyToolStripMenuItem});
+            this.safetyToolStripMenuItem,
+            this.testToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
-            this.menuStrip1.Size = new System.Drawing.Size(660, 24);
+            this.menuStrip1.Size = new System.Drawing.Size(676, 24);
             this.menuStrip1.TabIndex = 140;
             this.menuStrip1.Text = "menuStrip1";
             // 
             // weldToolStripMenuItem
             // 
-            this.weldToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.linearToolStripMenuItem,
-            this.spotToolStripMenuItem,
-            this.trackingToolStripMenuItem});
             this.weldToolStripMenuItem.Name = "weldToolStripMenuItem";
             this.weldToolStripMenuItem.Size = new System.Drawing.Size(46, 20);
             this.weldToolStripMenuItem.Text = "Weld";
-            // 
-            // linearToolStripMenuItem
-            // 
-            this.linearToolStripMenuItem.Name = "linearToolStripMenuItem";
-            this.linearToolStripMenuItem.Size = new System.Drawing.Size(120, 22);
-            this.linearToolStripMenuItem.Text = "Linear";
-            this.linearToolStripMenuItem.Click += new System.EventHandler(this.OpenLinearWeldfrm);
-            // 
-            // spotToolStripMenuItem
-            // 
-            this.spotToolStripMenuItem.Name = "spotToolStripMenuItem";
-            this.spotToolStripMenuItem.Size = new System.Drawing.Size(120, 22);
-            this.spotToolStripMenuItem.Text = "Spot";
-            // 
-            // trackingToolStripMenuItem
-            // 
-            this.trackingToolStripMenuItem.Name = "trackingToolStripMenuItem";
-            this.trackingToolStripMenuItem.Size = new System.Drawing.Size(120, 22);
-            this.trackingToolStripMenuItem.Text = "Tracking";
-            this.trackingToolStripMenuItem.Click += new System.EventHandler(this.OpenTrackingWeldfrm);
+            this.weldToolStripMenuItem.Click += new System.EventHandler(this.weldToolStripMenuItem_Click);
             // 
             // safetyToolStripMenuItem
             // 
@@ -1197,11 +1212,42 @@ namespace MysteryBoxWorkaround
             this.safetyToolStripMenuItem.Text = "Safety";
             this.safetyToolStripMenuItem.Click += new System.EventHandler(this.Safety_click);
             // 
+            // testToolStripMenuItem
+            // 
+            this.testToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.calibrateMagneticSensorsToolStripMenuItem,
+            this.analogControlToolStripMenuItem,
+            this.simulinkControlToolStripMenuItem});
+            this.testToolStripMenuItem.Name = "testToolStripMenuItem";
+            this.testToolStripMenuItem.Size = new System.Drawing.Size(41, 20);
+            this.testToolStripMenuItem.Text = "Test";
+            // 
+            // calibrateMagneticSensorsToolStripMenuItem
+            // 
+            this.calibrateMagneticSensorsToolStripMenuItem.Name = "calibrateMagneticSensorsToolStripMenuItem";
+            this.calibrateMagneticSensorsToolStripMenuItem.Size = new System.Drawing.Size(217, 22);
+            this.calibrateMagneticSensorsToolStripMenuItem.Text = "Calibrate Magnetic Sensors";
+            this.calibrateMagneticSensorsToolStripMenuItem.Click += new System.EventHandler(this.calibrateMagneticSensorsToolStripMenuItem_Click);
+            // 
+            // analogControlToolStripMenuItem
+            // 
+            this.analogControlToolStripMenuItem.Name = "analogControlToolStripMenuItem";
+            this.analogControlToolStripMenuItem.Size = new System.Drawing.Size(217, 22);
+            this.analogControlToolStripMenuItem.Text = "Analog Control";
+            this.analogControlToolStripMenuItem.Click += new System.EventHandler(this.analogControlToolStripMenuItem_Click);
+            // 
+            // simulinkControlToolStripMenuItem
+            // 
+            this.simulinkControlToolStripMenuItem.Name = "simulinkControlToolStripMenuItem";
+            this.simulinkControlToolStripMenuItem.Size = new System.Drawing.Size(217, 22);
+            this.simulinkControlToolStripMenuItem.Text = "Simulink Control";
+            this.simulinkControlToolStripMenuItem.Click += new System.EventHandler(this.simulinkControlToolStripMenuItem_Click);
+            // 
             // GUI
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(660, 512);
+            this.ClientSize = new System.Drawing.Size(676, 523);
             this.Controls.Add(this.boxForce);
             this.Controls.Add(this.groupBox15);
             this.Controls.Add(this.boxOperations);
@@ -1218,6 +1264,7 @@ namespace MysteryBoxWorkaround
             this.Load += new System.EventHandler(this.GUI_FormLoading);
             this.groupBox1.ResumeLayout(false);
             this.BoxMotors.ResumeLayout(false);
+            this.BoxMotors.PerformLayout();
             this.boxSpi.ResumeLayout(false);
             this.boxSpi.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.nmSpiRPM)).EndInit();
@@ -1327,8 +1374,6 @@ namespace MysteryBoxWorkaround
         private System.Windows.Forms.Label lblExternalVolt;
         private System.Windows.Forms.MenuStrip menuStrip1;
         private System.Windows.Forms.ToolStripMenuItem weldToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem linearToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem spotToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem safetyToolStripMenuItem;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.Label lblXYHistory;
@@ -1339,7 +1384,13 @@ namespace MysteryBoxWorkaround
         private System.Windows.Forms.Button button1;
         private System.Windows.Forms.Button button2;
         private System.Windows.Forms.Button button3;
-        private System.Windows.Forms.ToolStripMenuItem trackingToolStripMenuItem;
+        private System.Windows.Forms.Label lblTemp3;
+        private System.Windows.Forms.Label lblTemp2;
+        private System.Windows.Forms.Label lblTemp1;
+        private System.Windows.Forms.ToolStripMenuItem testToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem calibrateMagneticSensorsToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem analogControlToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem simulinkControlToolStripMenuItem;
     }
 }
 

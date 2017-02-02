@@ -286,10 +286,10 @@
             this.nmVerMax.DecimalPlaces = 2;
             this.nmVerMax.Location = new System.Drawing.Point(79, 22);
             this.nmVerMax.Maximum = new decimal(new int[] {
-            7,
+            75,
             0,
             0,
-            0});
+            65536});
             this.nmVerMax.Minimum = new decimal(new int[] {
             1,
             0,
